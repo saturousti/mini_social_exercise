@@ -1,12 +1,15 @@
 from flask import Flask, render_template, request, redirect, url_for, session, flash, g
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
 from cryptography.fernet import Fernet
 import collections
 import json
 import sqlite3
 import hashlib
-import re
+import requests
 from datetime import datetime
+import os
+
 
 app = Flask(__name__)
 app.secret_key = '123456789' 
@@ -26,6 +29,16 @@ MODERATION_CONFIG = json.loads(decrypted_data)
 TIER1_WORDS = MODERATION_CONFIG['categories']['tier1_severe_violations']['words']
 TIER2_PHRASES = MODERATION_CONFIG['categories']['tier2_spam_scams']['phrases']
 TIER3_WORDS = MODERATION_CONFIG['categories']['tier3_mild_profanity']['words']
+
+#Coding assigment 2; profile pic
+UPLOAD_FOLDER = 'static/uploads/avatars'
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def get_db():
     """
@@ -313,6 +326,21 @@ def user_profile(username):
         if follow_relation:
             is_currently_following = True
     # --
+    #Coding assignment 1: first function
+
+    dob = None
+    if isinstance(user, dict) or hasattr(user, 'keys'):
+        keys = user.keys()
+        if 'birthdate' in keys and user['birthdate']:
+            dob = user['birthdate']
+        elif 'dob' in keys and user['dob']:
+            dob = user['dob']
+
+   # dob = None
+    #if user and 'birthdate' in user.keys():
+     #   dob = user['birthdate']
+
+    zodiac_sign, horoscope = get_daily_horoscope(dob)
 
     return render_template('user_profile.html.j2', 
                            user=user, 
@@ -320,8 +348,59 @@ def user_profile(username):
                            comments=comments,
                            followers_count=followers_count, 
                            following_count=following_count,
+                           zodiac_sign=zodiac_sign,
+                           horoscope=horoscope,
                            is_following=is_currently_following)
-    
+                           
+#coding assigment 2: profile editing 
+@app.route('/profile/edit', methods=['GET', 'POST'])
+def edit_profile():
+    """User is able to edit own profile (bio, location, profile photo)."""
+    user_id = session.get('user_id')
+    if not user_id:
+        flash('You must be logged in to edit your profile.', 'danger')
+        return redirect(url_for('login'))
+
+    db = get_db()
+    user = query_db('SELECT * FROM users WHERE id = ?', (user_id,), one=True)
+
+    if request.method == 'POST':
+        profile = request.form.get('profile', '')
+        location = request.form.get('location', '')
+        remove_image = request.form.get('remove_image')
+        
+        # Save current photo as default photo
+        profile_image = user['profile_image'] if 'profile_image' in user.keys() else None
+
+        if remove_image == '1':
+            if profile_image:
+                old_file_path = os.path.join(app.config['UPLOAD_FOLDER'], profile_image)
+                if os.path.exists(old_file_path):
+                    os.remove(old_file_path)
+            profile_image = None
+
+        # Handling new profile picture if given
+        file = request.files.get('profile_image')
+        if file and file.filename != '' and allowed_file(file.filename):
+            filename = secure_filename(f"user_{session['username']}_{file.filename}")
+            file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+            profile_image = filename
+
+        # Updating user info (bio/profile, location, profile_image)
+        db.execute(
+            'UPDATE users SET profile = ?, location = ?, profile_image = ? WHERE id = ?',
+            (profile, location, profile_image, user_id)
+        )
+        db.commit()
+        flash('Your profile has been updated successfully!', 'success')
+        return redirect(url_for('user_profile', username=session['username']))
+
+    # Moderating bio to be displayed on form
+    user_dict = dict(user)
+    moderated_bio, _ = moderate_content(user_dict.get('profile', ''))
+    user_dict['profile'] = moderated_bio
+
+    return render_template('edit_profile.html.j2', user=user_dict)
 
 @app.route('/u/<username>/followers')
 def user_followers(username):
@@ -839,6 +918,34 @@ def admin_delete_post(post_id):
     flash(f'Post {post_id} has been deleted.', 'success')
     return redirect(url_for('admin_dashboard'))
 
+#Coding assignment 1, horoscope post button:
+@app.route('/share-horoscope', methods=['POST'])
+def share_horoscope():
+    """Creates a new post from the user's horoscope of the day for the feed."""
+    user_id = session.get('user_id')
+
+    # Check ig logged in
+    if not user_id:
+        flash('You must be logged in to share the horoscope.', 'danger')
+        return redirect(url_for('login'))
+
+    zodiac_sign = request.form.get('zodiac_sign')
+    horoscope_text = request.form.get('horoscope')
+
+    if zodiac_sign and horoscope_text:
+        # Designing the post
+        post_content = f"✨ My daily horoscope {zodiac_sign} says: \"{horoscope_text}\" #{zodiac_sign}"
+
+        db = get_db()
+        db.execute('INSERT INTO posts (user_id, content) VALUES (?, ?)',
+                   (user_id, post_content))
+        db.commit()
+        
+        flash('Your horoscope was successfully posted!', 'success')
+        return redirect(url_for('feed'))
+    else:
+        flash('Sharing failed.', 'warning')
+        return redirect(request.referrer or url_for('feed'))
 
 @app.route('/admin/delete/comment/<int:comment_id>', methods=['POST'])
 def admin_delete_comment(comment_id):
@@ -865,6 +972,58 @@ def loop_color(user_id):
     b = int(h[4:6], 16)
     return f'rgb({r % 128 + 80}, {g % 128 + 80}, {b % 128 + 80})'
 
+#Coding assignment 1: first functionality
+def get_zodiac_sign(day, month):
+    """Returns the horoscope to retrieve from the external interface."""
+    zodiac_dates = [
+        (1, 20, "Capricorn"), (2, 19, "Aquarius"),
+        (3, 21, "Pisces"), (4, 20, "Aries"),
+        (5, 21, "Taurus"), (6, 21, "Gemini"),
+        (7, 23, "Cancer"), (8, 23, "Leo"),
+        (9, 23, "Virgo"), (10, 23, "Libra"),
+        (11, 22, "Scorpio"), (12, 22, "Sagittarius"),
+        (12, 31, "Capricorn")
+    ]
+    for m, d, sign in zodiac_dates:
+        if month < m or (month == m and day <= d):
+            return sign
+    return "Capricorn"
+
+def get_daily_horoscope(dob_str):
+    """Retrieves a daily changing horoscope from the external interface."""
+    if not dob_str:
+        return None, None
+
+    try:
+        dob_str = str(dob_str).split(' ')[0].strip()
+        dob = datetime.strptime(dob_str, "%Y-%m-%d")
+        sign = get_zodiac_sign(dob.day, dob.month)
+
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        url = f"https://horoscope-app-api.vercel.app/api/v1/get-horoscope/daily?sign={sign}&day={today}"
+        response = requests.get(url, timeout=4)
+
+        if response.status_code == 200:
+            data = response.json()
+            
+            # Searching for forecast text from various possible keys in API response:
+            res_data = data.get("data")
+            
+            if isinstance(res_data, dict):
+                horoscope_text = res_data.get("horoscope_data") or res_data.get("horoscope") or str(res_data)
+            elif isinstance(res_data, str):
+                horoscope_text = res_data
+            else:
+                horoscope_text = data.get("horoscope") or "Couldn't access the prediction."
+
+            return sign, horoscope_text
+        else:
+            return sign, "Daily horoscope isn't available right now."
+        
+    except Exception as e:
+        print(f"Error: {e}")
+        return None, None
 
 # ----- Functions to be implemented are below
 # Coding Assignment #2

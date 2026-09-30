@@ -4,50 +4,97 @@
 
 <div class="container mt-5">
 
-  <!-- User Profile Information Card -->
-  <div class="card col-lg-8 mx-auto">
-    <div class="row g-0 align-items-center">
-      <div class="col-md-12">
-        <div class="card-body">
-          <h2 class="card-title">{{ user_display(user.username) }}</h2>
-          <p class="card-text text-muted mb-3">
-            <strong>Location:</strong> {{ user.location or "N/A" }}<br>
-            <strong>Birthdate:</strong> {{ user.birthdate or "N/A" }}<br>
-            <strong>Joined:</strong> {{ user.created_at|datetimeformat }}
-          </p>
-          <p class="card-text">{{ user.profile or "No profile information provided." }}</p>
-
-         {% if session.user_id and session.user_id != user.id %}
-            <div class="my-3">
-              {# The logic is now a simple boolean check #}
-              {% if is_following %}
-                <form action="{{ url_for('unfollow_user', user_id=user.id) }}" method="POST" class="d-inline">
-                  <button type="submit" class="btn btn-secondary">Unfollow</button>
-                </form>
-              {% else %}
-                <form action="{{ url_for('follow_user', user_id=user.id) }}" method="POST" class="d-inline">
-                  <button type="submit" class="btn btn-primary">Follow</button>
-                </form>
-              {% endif %}
-            </div>
+<!-- User Profile Information Card -->
+  <div class="card col-lg-8 mx-auto shadow-sm">
+    <div class="card-body">
+      <div class="row align-items-center mb-3">
+        
+        <!-- Profiilikuva / Oletus-avatar vasemmalla -->
+        <div class="col-auto">
+          {% if user.profile_image %}
+              <img src="{{ url_for('static', filename='uploads/avatars/' + user.profile_image) }}" 
+                   alt="{{ user.username }}" class="rounded-circle" width="90" height="90" style="object-fit: cover;">
+          {% else %}
+              <div class="rounded-circle d-inline-flex align-items-center justify-content-center text-white" 
+                   style="width: 90px; height: 90px; background-color: {{ loop_color(user.id) }}; font-size: 32px;">
+                  {{ user.username[0].upper() }}
+              </div>
           {% endif %}
+        </div>
 
-          <div class="mt-4 d-flex">
-            <div class="me-4">
-              <a href="/u/{{ user.username }}/followers" class="text-decoration-none text-dark">
-                <strong>{{ followers_count }}</strong> Followers
-              </a>
-            </div>
-            <div>
-              <a href="/u/{{ user.username }}/following" class="text-decoration-none text-dark">
-                <strong>{{ following_count }}</strong> Following
-              </a>
-            </div>
-          </div>
+        <!-- Otsikko ja Muokkaus-painike oikealla -->
+        <div class="col d-flex justify-content-between align-items-center">
+          <h2 class="card-title mb-0">@{{ user.username }}</h2>
+          
+          {% if session.get('user_id') == user.id %}
+            <a href="{{ url_for('edit_profile') }}" class="btn btn-sm btn-outline-secondary" style="color: #000204 !important;">
+              Edit Profile
+          </a>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- Kayttajan tiedot -->
+      <p class="card-text text-muted mb-3">
+        <strong>Location:</strong> {{ user.location or "N/A" }}<br>
+        <strong>Birthdate:</strong> {{ user.birthdate or "N/A" }}<br>
+        <strong>Joined:</strong> {{ user.created_at|datetimeformat }}
+      </p>
+
+      <!-- Valmis Bio / Profiilikuvaus-osio -->
+      <p class="card-text">{{ user.profile or "No profile information provided." }}</p>
+
+      {% if session.user_id and session.user_id != user.id %}
+        <div class="my-3">
+          {% if is_following %}
+            <form action="{{ url_for('unfollow_user', user_id=user.id) }}" method="POST" class="d-inline">
+              <button type="submit" class="btn btn-secondary">Unfollow</button>
+            </form>
+          {% else %}
+            <form action="{{ url_for('follow_user', user_id=user.id) }}" method="POST" class="d-inline">
+              <button type="submit" class="btn btn-primary">Follow</button>
+            </form>
+          {% endif %}
+        </div>
+      {% endif %}
+
+      <div class="mt-4 d-flex">
+        <div class="me-4">
+          <a href="/u/{{ user.username }}/followers" class="text-decoration-none text-dark">
+            <strong>{{ followers_count }}</strong> Followers
+          </a>
+        </div>
+        <div>
+          <a href="/u/{{ user.username }}/following" class="text-decoration-none text-dark">
+            <strong>{{ following_count }}</strong> Following
+          </a>
         </div>
       </div>
     </div>
   </div>
+
+
+<!-- HOROSCOPE WITH BUTTON -->
+{% if zodiac_sign %}
+  <div style="background-color: #f8f9fa; border: 1px solid #00a6ff; padding: 15px; border-radius: 8px; margin: 15px 0;">
+    <h3 style="margin-top: 0; color: #00a6ff; font-size: 1.2em;">✨ Daily horoscope: {{ zodiac_sign }} ✨</h3>
+    
+    <p style="font-family: 'Georgia', serif; font-size: 1.05em; font-style: italic; color: #333;">
+      "{{ horoscope }}"
+    </p>
+
+    <!-- If signed in and lookin at own profile -->
+    {% if session.get('user_id') and session.get('user_id') == user.id %}
+      <form action="{{ url_for('share_horoscope') }}" method="POST" style="margin-top: 10px;">
+        <input type="hidden" name="zodiac_sign" value="{{ zodiac_sign }}">
+        <input type="hidden" name="horoscope" value="{{ horoscope }}">
+        <button type="submit" style="background-color: #00d0ff; color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; font-weight: bold;">
+           Share to followers 
+        </button>
+      </form>
+    {% endif %}
+  </div>
+{% endif %}
 
   <h3 class="text-center border-bottom pb-2 my-5"><span>Latest Posts</span></h3>
 
@@ -94,6 +141,7 @@
     </div>
     {% endfor %}
   </div>
+
 
 </div>
 {% endblock %}

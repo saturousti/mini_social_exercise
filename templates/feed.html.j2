@@ -22,6 +22,22 @@
 </div>
 {% endif %}
 
+<!-- Horoscope in front page -->
+{% if session.get('username') %}
+<div class="col-md-8 mx-auto mb-4">
+  <div style="background: linear-gradient(135deg, #6e8efb, #a777e3); color: white; padding: 12px 20px; border-radius: 8px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 5px rgba(0,0,0,0.1);">
+    <div style="font-size: 0.9em; line-height: 1.3;">
+      <strong style="font-size: 1em;"> Find out what your zodiac sign has got for you today!</strong>
+      <p style="margin: 3px 0 0 0; font-size: 0.85em; opacity: 0.9;">Read today's horoscope in your profile and share it with others.</p>
+    </div>
+    <a href="{{ url_for('user_profile', username=session.get('username')) }}" 
+       style="display: inline-block; width: auto; background-color: white; color: #6e8efb; font-weight: bold; padding: 6px 14px; border-radius: 20px; text-decoration: none; font-size: 0.85em; white-space: nowrap; margin-left: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+      To my profile
+    </a>
+  </div>
+</div>
+{% endif %}
+
 <h2 class="text-center border-bottom pb-2 mb-4"><span>Posts</span></h2>
 
 <div class="mb-4 text-center">
