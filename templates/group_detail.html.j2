@@ -1,0 +1,76 @@
+{% extends "base.html.j2" %}
+
+{% block content %}
+<div class="container mt-4">
+    <div class="d-flex align-items-center mb-3">
+        <h1 class="me-3">{{ group.icon }}</h1>
+        <div>
+            <h2>{{ group.name }}</h2>
+            <p class="text-muted mb-0">{{ group.description }}</p>
+        </div>
+        <div class="ms-auto">
+            {% if session.get('user_id') %}
+                {% if is_member %}
+                    <form action="{{ url_for('leave_group', group_id=group.id) }}" method="POST">
+                        <button type="submit" class="btn btn-secondary">Exit group</button>
+                    </form>
+                {% else %}
+                    <form action="{{ url_for('join_group', group_id=group.id) }}" method="POST">
+                        <button type="submit" class="btn btn-success">Join group</button>
+                    </form>
+                {% endif %}
+            {% endif %}
+        </div>
+    </div>
+
+    <hr>
+
+    <!-- Shows only to members! -->
+    {% if session.get('user_id') %}
+        {% if is_member %}
+            <div class="card mb-4">
+                <div class="card-body">
+                    <h5>Post something</h5>
+                    <form action="{{ url_for('add_group_post', group_id=group.id) }}" method="POST">
+                        <div class="mb-3">
+                            <textarea name="content" class="form-control" rows="3" placeholder="What's on your mind?" required></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary">Post to group members</button>
+                    </form>
+                </div>
+            </div>
+        {% else %}
+            <div class="alert alert-info">
+                Join to take a part to conversation!
+            </div>
+        {% endif %}
+    {% else %}
+        <div class="alert alert-warning">
+            <a href="{{ url_for('login') }}">Sign in </a> to join the conversation.
+        </div>
+    {% endif %}
+
+    <!-- Group's posts -->
+    <h3>Group's conversations</h3>
+    {% if posts %}
+        {% for post in posts %}
+            <div class="card mb-3">
+                <div class="card-body">
+                    <h6 class="card-subtitle mb-2 text-muted">
+                        <a href="{{ url_for('user_profile', username=post.username) }}">@{{ post.username }}</a>
+                        · {{ post.created_at | datetimeformat }}
+                    </h6>
+                    <p class="card-text">{{ post.content }}</p>
+                    
+                    <!-- Muutettu selkeäksi napiksi, joka erottuu taustasta -->
+                    <a href="{{ url_for('post_detail', post_id=post.id) }}" class="btn btn-sm mt-2" style="color: #17c8b6; background-color: #333333;">
+                        Comments
+                    </a>
+                </div>
+            </div>
+        {% endfor %}
+    {% else %}
+        <p class="text-muted">There are no publications in this group yet.</p>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,38 @@
+{% extends "base.html.j2" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Mini social groups</h2>
+    <p class="text-muted">Join and make new friends!</p>
+
+    <div class="row mt-3">
+        {% for group in groups %}
+        <div class="col-md-4 mb-3">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body text-center">
+                    <h1 class="display-4">{{ group.icon }}</h1>
+                    <h4 class="card-title">{{ group.name }}</h4>
+                    <p class="card-text text-muted">{{ group.description }}</p>
+                    <p class="small text-secondary">Members: {{ group.member_count }}</p>
+                </div>
+                <div class="card-footer bg-white border-0 text-center pb-3">
+                    <a href="{{ url_for('group_detail', group_id=group.id) }}" class="btn btn-primary btn-sm me-1">Open</a>
+                    
+                    {% if session.get('user_id') %}
+                        {% if group.is_member %}
+                            <form action="{{ url_for('leave_group', group_id=group.id) }}" method="POST" class="d-inline">
+                                <button type="submit" class="btn btn-outline-danger btn-sm">Exit</button>
+                            </form>
+                        {% else %}
+                            <form action="{{ url_for('join_group', group_id=group.id) }}" method="POST" class="d-inline">
+                                <button type="submit" class="btn btn-primary btn-sm">Join group</button>
+                            </form>
+                        {% endif %}
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

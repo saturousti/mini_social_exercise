@@ -9,7 +9,7 @@
     <div class="card-body">
       <div class="row align-items-center mb-3">
         
-        <!-- Profiilikuva / Oletus-avatar vasemmalla -->
+        <!-- profile pic -->
         <div class="col-auto">
           {% if user.profile_image %}
               <img src="{{ url_for('static', filename='uploads/avatars/' + user.profile_image) }}" 
@@ -34,14 +34,14 @@
         </div>
       </div>
 
-      <!-- Kayttajan tiedot -->
+      <!-- user info -->
       <p class="card-text text-muted mb-3">
         <strong>Location:</strong> {{ user.location or "N/A" }}<br>
         <strong>Birthdate:</strong> {{ user.birthdate or "N/A" }}<br>
         <strong>Joined:</strong> {{ user.created_at|datetimeformat }}
       </p>
 
-      <!-- Valmis Bio / Profiilikuvaus-osio -->
+      <!-- Bio -->
       <p class="card-text">{{ user.profile or "No profile information provided." }}</p>
 
       {% if session.user_id and session.user_id != user.id %}

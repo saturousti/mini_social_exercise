@@ -110,7 +110,7 @@ REACTION_TYPES = list(REACTION_EMOJIS.keys())
 
 @app.route('/')
 def feed():
-    #  1. Get Pagination and Filter Parameters 
+    # 1. Get Pagination and Filter Parameters
     try:
         page = int(request.args.get('page', 1))
     except ValueError:
@@ -125,15 +125,20 @@ def feed():
     current_user_id = session.get('user_id')
     params = []
 
-    #  2. Build the Query 
-    where_clause = ""
+    # Filter out group posts so they only appear on their respective group pages
+    where_conditions = ["p.group_id IS NULL"]
+
     if show == 'following' and current_user_id:
-        where_clause = "WHERE p.user_id IN (SELECT followed_id FROM follows WHERE follower_id = ?)"
+        where_conditions.append("p.user_id IN (SELECT followed_id FROM follows WHERE follower_id = ?)")
         params.append(current_user_id)
+
+    # Build the final WHERE clause dynamically
+    where_clause = "WHERE " + " AND ".join(where_conditions)
 
     # Add the pagination parameters to the query arguments
     pagination_params = (POSTS_PER_PAGE, offset)
 
+    # 2. Build and execute the SQL query based on the selected sort order
     if sort == 'popular':
         query = f"""
             SELECT p.id, p.content, p.created_at, u.username, u.id as user_id,
@@ -164,53 +169,59 @@ def feed():
         posts = query_db(query, final_params)
 
     posts_data = []
-    for post in posts:
-        # Determine if the current user follows the poster
-        followed_poster = False
-        if current_user_id and post['user_id'] != current_user_id:
-            follow_check = query_db(
-                'SELECT 1 FROM follows WHERE follower_id = ? AND followed_id = ?',
-                (current_user_id, post['user_id']),
-                one=True
-            )
-            if follow_check:
-                followed_poster = True
+    if posts:
+        for post in posts:
+            # Determine if the current user follows the poster
+            followed_poster = False
+            if current_user_id and post['user_id'] != current_user_id:
+                follow_check = query_db(
+                    'SELECT 1 FROM follows WHERE follower_id = ? AND followed_id = ?',
+                    (current_user_id, post['user_id']),
+                    one=True
+                )
+                if follow_check:
+                    followed_poster = True
 
-        # Determine if the current user reacted to this post and with what reaction
-        user_reaction = None
-        if current_user_id:
-            reaction_check = query_db(
-                'SELECT reaction_type FROM reactions WHERE user_id = ? AND post_id = ?',
-                (current_user_id, post['id']),
-                one=True
-            )
-            if reaction_check:
-                user_reaction = reaction_check['reaction_type']
+            # Determine if the current user reacted to this post and with what reaction
+            user_reaction = None
+            if current_user_id:
+                reaction_check = query_db(
+                    'SELECT reaction_type FROM reactions WHERE user_id = ? AND post_id = ?',
+                    (current_user_id, post['id']),
+                    one=True
+                )
+                if reaction_check:
+                    user_reaction = reaction_check['reaction_type']
 
-        reactions = query_db('SELECT reaction_type, COUNT(*) as count FROM reactions WHERE post_id = ? GROUP BY reaction_type', (post['id'],))
-        comments_raw = query_db('SELECT c.id, c.content, c.created_at, u.username, u.id as user_id FROM comments c JOIN users u ON c.user_id = u.id WHERE c.post_id = ? ORDER BY c.created_at ASC', (post['id'],))
-        post_dict = dict(post)
-        post_dict['content'], _ = moderate_content(post_dict['content'])
-        comments_moderated = []
-        for comment in comments_raw:
-            comment_dict = dict(comment)
-            comment_dict['content'], _ = moderate_content(comment_dict['content'])
-            comments_moderated.append(comment_dict)
-        posts_data.append({
-            'post': post_dict,
-            'reactions': reactions,
-            'user_reaction': user_reaction,
-            'followed_poster': followed_poster,
-            'comments': comments_moderated
-        })
+            # Fetch reactions and comments for the post
+            reactions = query_db('SELECT reaction_type, COUNT(*) as count FROM reactions WHERE post_id = ? GROUP BY reaction_type', (post['id'],))
+            comments_raw = query_db('SELECT c.id, c.content, c.created_at, u.username, u.id as user_id FROM comments c JOIN users u ON c.user_id = u.id WHERE c.post_id = ? ORDER BY c.created_at ASC', (post['id'],))
+            
+            # Apply content moderation to post and comments
+            post_dict = dict(post)
+            post_dict['content'], _ = moderate_content(post_dict['content'])
+            comments_moderated = []
+            if comments_raw:
+                for comment in comments_raw:
+                    comment_dict = dict(comment)
+                    comment_dict['content'], _ = moderate_content(comment_dict['content'])
+                    comments_moderated.append(comment_dict)
 
-    #  4. Render Template with Pagination Info 
+            posts_data.append({
+                'post': post_dict,
+                'reactions': reactions,
+                'user_reaction': user_reaction,
+                'followed_poster': followed_poster,
+                'comments': comments_moderated
+            })
+
+    # 3. Render Template with Pagination Info
     return render_template('feed.html.j2', 
                            posts=posts_data, 
                            current_sort=sort,
                            current_show=show,
-                           page=page, # Pass current page number
-                           per_page=POSTS_PER_PAGE, # Pass items per page
+                           page=page,
+                           per_page=POSTS_PER_PAGE,
                            reaction_emojis=REACTION_EMOJIS,
                            reaction_types=REACTION_TYPES)
 
@@ -326,7 +337,7 @@ def user_profile(username):
         if follow_relation:
             is_currently_following = True
     # --
-    #Coding assignment 1: first function
+    #Coding assignment 1: horoscope related
 
     dob = None
     if isinstance(user, dict) or hasattr(user, 'keys'):
@@ -336,9 +347,6 @@ def user_profile(username):
         elif 'dob' in keys and user['dob']:
             dob = user['dob']
 
-   # dob = None
-    #if user and 'birthdate' in user.keys():
-     #   dob = user['birthdate']
 
     zodiac_sign, horoscope = get_daily_horoscope(dob)
 
@@ -362,7 +370,7 @@ def edit_profile():
         return redirect(url_for('login'))
 
     db = get_db()
-    user = query_db('SELECT * FROM users WHERE id = ?', (user_id,), one=True)
+    user = query_db('SELECT * FROM users WHERE id = ?', (user_id,), one=True) #getting user from database with user_id key
 
     if request.method == 'POST':
         profile = request.form.get('profile', '')
@@ -380,11 +388,11 @@ def edit_profile():
             profile_image = None
 
         # Handling new profile picture if given
-        file = request.files.get('profile_image')
-        if file and file.filename != '' and allowed_file(file.filename):
-            filename = secure_filename(f"user_{session['username']}_{file.filename}")
-            file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
-            profile_image = filename
+        file = request.files.get('profile_image') #requesting picture file
+        if file and file.filename != '' and allowed_file(file.filename): #if accettable file
+            filename = secure_filename(f"user_{session['username']}_{file.filename}") #give new filename
+            file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename)) #uploading file from computer
+            profile_image = filename #profile image is now the given filename 
 
         # Updating user info (bio/profile, location, profile_image)
         db.execute(
@@ -918,6 +926,127 @@ def admin_delete_post(post_id):
     flash(f'Post {post_id} has been deleted.', 'success')
     return redirect(url_for('admin_dashboard'))
 
+#coding assigment 1: third implementation, groups
+@app.route('/groups')
+def list_groups():
+    """List all the user's groups."""
+    user_id = session.get('user_id')
+    groups = query_db('''
+        SELECT g.*, 
+               (SELECT COUNT(*) FROM group_memberships WHERE group_id = g.id) as member_count,
+               EXISTS(SELECT 1 FROM group_memberships WHERE group_id = g.id AND user_id = ?) as is_member
+        FROM groups g
+    ''', (user_id,))
+    
+    return render_template('groups.html.j2', groups=groups)
+
+
+@app.route('/groups/<int:group_id>')
+def group_detail(group_id):
+    """Show group's site and posts."""
+    user_id = session.get('user_id')
+    group_raw = query_db('SELECT * FROM groups WHERE id = ?', (group_id,), one=True)
+    if not group_raw:
+        abort(404)
+
+    group = dict(group_raw)
+
+    is_member = False
+    if user_id:
+        membership = query_db(
+            'SELECT 1 FROM group_memberships WHERE user_id = ? AND group_id = ?',
+            (user_id, group_id), one=True
+        )
+        is_member = bool(membership)
+
+    # retrieve a particular group's posts
+    posts_raw = query_db('''
+        SELECT p.id, p.content, p.created_at, u.username, u.id as user_id
+        FROM posts p
+        JOIN users u ON p.user_id = u.id
+        WHERE p.group_id = ?
+        ORDER BY p.created_at DESC
+    ''', (group_id,))
+
+    posts = []
+    if posts_raw:
+        for post in posts_raw:
+            post_dict = dict(post)
+            post_dict['content'], _ = moderate_content(post_dict['content'])
+            posts.append(post_dict)
+
+    return render_template('group_detail.html.j2', group=group, posts=posts, is_member=is_member)
+
+
+@app.route('/groups/<int:group_id>/join', methods=['POST'])
+def join_group(group_id):
+    """user joins a group"""
+    user_id = session.get('user_id')
+    if not user_id:
+        flash('Sign in to join the group.', 'danger')
+        return redirect(url_for('login'))
+
+    db = get_db()
+    try:
+        db.execute(
+            'INSERT INTO group_memberships (user_id, group_id) VALUES (?, ?)',
+            (user_id, group_id)
+        )
+        db.commit()
+        flash('Joining successful!', 'success')
+    except sqlite3.IntegrityError:
+        flash('You are already a member of this group', 'info')
+
+    return redirect(request.referrer or url_for('group_detail', group_id=group_id))
+
+
+@app.route('/groups/<int:group_id>/leave', methods=['POST'])
+def leave_group(group_id):
+    """Leaving the group."""
+    user_id = session.get('user_id')
+    if not user_id:
+        return redirect(url_for('login'))
+
+    db = get_db()
+    db.execute(
+        'DELETE FROM group_memberships WHERE user_id = ? AND group_id = ?',
+        (user_id, group_id)
+    )
+    db.commit()
+    flash('You have successfully left the group.', 'info')
+
+    return redirect(request.referrer or url_for('group_detail', group_id=group_id))
+
+
+@app.route('/groups/<int:group_id>/posts/new', methods=['POST'])
+def add_group_post(group_id):
+    """Posting to group's site."""
+    user_id = session.get('user_id')
+    if not user_id:
+        flash('Sign in to post', 'danger')
+        return redirect(url_for('login'))
+
+    # Ensure that the user is a member of the group before posting
+    is_member = query_db(
+        'SELECT 1 FROM group_memberships WHERE user_id = ? AND group_id = ?',
+        (user_id, group_id), one=True
+    )
+    if not is_member:
+        flash('You must join the group to post there.', 'warning')
+        return redirect(url_for('group_detail', group_id=group_id))
+
+    content = request.form.get('content')
+    if content and content.strip():
+        db = get_db()
+        db.execute(
+            'INSERT INTO posts (user_id, group_id, content) VALUES (?, ?, ?)',
+            (user_id, group_id, content)
+        )
+        db.commit()
+        flash('Posted!', 'success')
+
+    return redirect(url_for('group_detail', group_id=group_id))
+
 #Coding assignment 1, horoscope post button:
 @app.route('/share-horoscope', methods=['POST'])
 def share_horoscope():
@@ -972,7 +1101,7 @@ def loop_color(user_id):
     b = int(h[4:6], 16)
     return f'rgb({r % 128 + 80}, {g % 128 + 80}, {b % 128 + 80})'
 
-#Coding assignment 1: first functionality
+#Coding assignment 1: first functionality, horoscope
 def get_zodiac_sign(day, month):
     """Returns the horoscope to retrieve from the external interface."""
     zodiac_dates = [
@@ -1024,6 +1153,29 @@ def get_daily_horoscope(dob_str):
     except Exception as e:
         print(f"Error: {e}")
         return None, None
+
+def seed_groups():
+    """Luo tai päivittää 3 faniryhmää tietokantaan sovelluksen käynnistyessä."""
+    default_groups = [
+        ('Beliebers', 'Beliebers from all around the world! Share stories, memories and make new friends! #JB', '❤️‍🔥'),
+        ('Hogwarts Legacy', 'Let the magic unfold and join to our Hogwarts Legacy gaming group with other witches and wizards!', '🧙'),
+        ('Girlie popss', 'Okay divas, its giving slay huntyy boots. Queens lets unite!', '🎀')
+    ]
+    db = get_db()
+    for name, desc, icon in default_groups:
+        # Ensin yritetään lisätä uusi ryhmä
+        db.execute(
+            'INSERT OR IGNORE INTO groups (name, description, icon) VALUES (?, ?, ?)',
+            (name, desc, icon)
+        )
+        # Varmistetaan, että kuvaus ja ikoni päivittyvät, vaikka ryhmä olisi jo olemassa
+        db.execute(
+            'UPDATE groups SET description = ?, icon = ? WHERE name = ?',
+            (desc, icon, name)
+        )
+    db.commit()
+
+
 
 # ----- Functions to be implemented are below
 # Coding Assignment #2
@@ -1098,5 +1250,8 @@ def recommend(user_id, filter_following):
     return recommended_posts;
 
 if __name__ == '__main__':
+    with app.app_context():
+        seed_groups()
+
     app.run(debug=True, port=8080)
 
