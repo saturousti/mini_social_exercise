@@ -943,14 +943,16 @@ def list_groups():
 
 @app.route('/groups/<int:group_id>')
 def group_detail(group_id):
-    """Show group's site and posts."""
+    """Displays a single group's page. Posts are visible only to members."""
     user_id = session.get('user_id')
+    
     group_raw = query_db('SELECT * FROM groups WHERE id = ?', (group_id,), one=True)
     if not group_raw:
         abort(404)
 
     group = dict(group_raw)
 
+    # Check if the logged-in user is a member of this group
     is_member = False
     if user_id:
         membership = query_db(
@@ -959,21 +961,22 @@ def group_detail(group_id):
         )
         is_member = bool(membership)
 
-    # retrieve a particular group's posts
-    posts_raw = query_db('''
-        SELECT p.id, p.content, p.created_at, u.username, u.id as user_id
-        FROM posts p
-        JOIN users u ON p.user_id = u.id
-        WHERE p.group_id = ?
-        ORDER BY p.created_at DESC
-    ''', (group_id,))
-
     posts = []
-    if posts_raw:
-        for post in posts_raw:
-            post_dict = dict(post)
-            post_dict['content'], _ = moderate_content(post_dict['content'])
-            posts.append(post_dict)
+    # Fetch posts ONLY if the user is a member of the group
+    if is_member:
+        posts_raw = query_db('''
+            SELECT p.id, p.content, p.created_at, u.username, u.id as user_id
+            FROM posts p
+            JOIN users u ON p.user_id = u.id
+            WHERE p.group_id = ?
+            ORDER BY p.created_at DESC
+        ''', (group_id,))
+
+        if posts_raw:
+            for post in posts_raw:
+                post_dict = dict(post)
+                post_dict['content'], _ = moderate_content(post_dict['content'])
+                posts.append(post_dict)
 
     return render_template('group_detail.html.j2', group=group, posts=posts, is_member=is_member)
 
