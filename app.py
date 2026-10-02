@@ -37,7 +37,7 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
-def allowed_file(filename):
+def allowed_file(filename): #is file allowed?
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def get_db():
@@ -343,7 +343,7 @@ def user_profile(username):
     if isinstance(user, dict) or hasattr(user, 'keys'):
         keys = user.keys()
         if 'birthdate' in keys and user['birthdate']:
-            dob = user['birthdate']
+            dob = user['birthdate'] #getting the correct birhday from db and saving it to dob
         elif 'dob' in keys and user['dob']:
             dob = user['dob']
 
@@ -356,15 +356,15 @@ def user_profile(username):
                            comments=comments,
                            followers_count=followers_count, 
                            following_count=following_count,
-                           zodiac_sign=zodiac_sign,
-                           horoscope=horoscope,
+                           zodiac_sign=zodiac_sign, #added for rendering
+                           horoscope=horoscope, #added for rendering
                            is_following=is_currently_following)
                            
-#coding assigment 2: profile editing 
+#coding assigment 1: profile editing 
 @app.route('/profile/edit', methods=['GET', 'POST'])
 def edit_profile():
     """User is able to edit own profile (bio, location, profile photo)."""
-    user_id = session.get('user_id')
+    user_id = session.get('user_id') #check if signed in
     if not user_id:
         flash('You must be logged in to edit your profile.', 'danger')
         return redirect(url_for('login'))
@@ -380,7 +380,7 @@ def edit_profile():
         # Save current photo as default photo
         profile_image = user['profile_image'] if 'profile_image' in user.keys() else None
 
-        if remove_image == '1':
+        if remove_image == '1': #actions to remove current photo
             if profile_image:
                 old_file_path = os.path.join(app.config['UPLOAD_FOLDER'], profile_image)
                 if os.path.exists(old_file_path):
@@ -930,7 +930,7 @@ def admin_delete_post(post_id):
 @app.route('/groups')
 def list_groups():
     """List all the user's groups."""
-    user_id = session.get('user_id')
+    user_id = session.get('user_id') #if users is in the group, join-button is not visible
     groups = query_db('''
         SELECT g.*, 
                (SELECT COUNT(*) FROM group_memberships WHERE group_id = g.id) as member_count,
@@ -984,7 +984,7 @@ def group_detail(group_id):
 @app.route('/groups/<int:group_id>/join', methods=['POST'])
 def join_group(group_id):
     """user joins a group"""
-    user_id = session.get('user_id')
+    user_id = session.get('user_id') #check if not joined
     if not user_id:
         flash('Sign in to join the group.', 'danger')
         return redirect(url_for('login'))
@@ -992,12 +992,12 @@ def join_group(group_id):
     db = get_db()
     try:
         db.execute(
-            'INSERT INTO group_memberships (user_id, group_id) VALUES (?, ?)',
+            'INSERT INTO group_memberships (user_id, group_id) VALUES (?, ?)', #add to db
             (user_id, group_id)
         )
         db.commit()
         flash('Joining successful!', 'success')
-    except sqlite3.IntegrityError:
+    except sqlite3.IntegrityError: #already in db
         flash('You are already a member of this group', 'info')
 
     return redirect(request.referrer or url_for('group_detail', group_id=group_id))
@@ -1012,7 +1012,7 @@ def leave_group(group_id):
 
     db = get_db()
     db.execute(
-        'DELETE FROM group_memberships WHERE user_id = ? AND group_id = ?',
+        'DELETE FROM group_memberships WHERE user_id = ? AND group_id = ?', #delete from db
         (user_id, group_id)
     )
     db.commit()
@@ -1042,7 +1042,7 @@ def add_group_post(group_id):
     if content and content.strip():
         db = get_db()
         db.execute(
-            'INSERT INTO posts (user_id, group_id, content) VALUES (?, ?, ?)',
+            'INSERT INTO posts (user_id, group_id, content) VALUES (?, ?, ?)', #adding to posts
             (user_id, group_id, content)
         )
         db.commit()
@@ -1069,7 +1069,7 @@ def share_horoscope():
         post_content = f"✨ My daily horoscope {zodiac_sign} says: \"{horoscope_text}\" #{zodiac_sign}"
 
         db = get_db()
-        db.execute('INSERT INTO posts (user_id, content) VALUES (?, ?)',
+        db.execute('INSERT INTO posts (user_id, content) VALUES (?, ?)', #add to db
                    (user_id, post_content))
         db.commit()
         
@@ -1119,7 +1119,7 @@ def get_zodiac_sign(day, month):
     for m, d, sign in zodiac_dates:
         if month < m or (month == m and day <= d):
             return sign
-    return "Capricorn"
+    return "Capricorn" #return the right zodiac sign
 
 def get_daily_horoscope(dob_str):
     """Retrieves a daily changing horoscope from the external interface."""
@@ -1129,17 +1129,17 @@ def get_daily_horoscope(dob_str):
     try:
         dob_str = str(dob_str).split(' ')[0].strip()
         dob = datetime.strptime(dob_str, "%Y-%m-%d")
-        sign = get_zodiac_sign(dob.day, dob.month)
+        sign = get_zodiac_sign(dob.day, dob.month) #parsing the month and day
 
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = datetime.now().strftime("%Y-%m-%d") #fetching for this date
 
-        url = f"https://horoscope-app-api.vercel.app/api/v1/get-horoscope/daily?sign={sign}&day={today}"
+        url = f"https://horoscope-app-api.vercel.app/api/v1/get-horoscope/daily?sign={sign}&day={today}" #external api for daily horoscopes
         response = requests.get(url, timeout=4)
 
         if response.status_code == 200:
             data = response.json()
             
-            # Searching for forecast text from various possible keys in API response:
+            # Searching for forecast text from various possible keys in api response:
             res_data = data.get("data")
             
             if isinstance(res_data, dict):
@@ -1158,7 +1158,7 @@ def get_daily_horoscope(dob_str):
         return None, None
 
 def seed_groups():
-    """Luo tai päivittää 3 faniryhmää tietokantaan sovelluksen käynnistyessä."""
+    """Create or update 3 groups in the database when the app starts."""
     default_groups = [
         ('Beliebers', 'Beliebers from all around the world! Share stories, memories and make new friends! #JB', '❤️‍🔥'),
         ('Hogwarts Legacy', 'Let the magic unfold and join to our Hogwarts Legacy gaming group with other witches and wizards!', '🧙'),
@@ -1166,12 +1166,12 @@ def seed_groups():
     ]
     db = get_db()
     for name, desc, icon in default_groups:
-        # Ensin yritetään lisätä uusi ryhmä
+        # try adding a new group first
         db.execute(
             'INSERT OR IGNORE INTO groups (name, description, icon) VALUES (?, ?, ?)',
             (name, desc, icon)
         )
-        # Varmistetaan, että kuvaus ja ikoni päivittyvät, vaikka ryhmä olisi jo olemassa
+        # Make sure that the description and icon are updated even if the group already exists
         db.execute(
             'UPDATE groups SET description = ?, icon = ? WHERE name = ?',
             (desc, icon, name)
