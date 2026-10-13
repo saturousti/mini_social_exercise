@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash, g
+from flask import Flask, render_template, request, redirect, url_for, session, flash, g, abort, jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from cryptography.fernet import Fernet
@@ -9,6 +9,7 @@ import hashlib
 import requests
 from datetime import datetime
 import os
+import re
 
 
 app = Flask(__name__)
@@ -258,39 +259,42 @@ def add_post():
     
 @app.route('/posts/<int:post_id>/delete', methods=['POST'])
 def delete_post(post_id):
-    """Handles deleting a post."""
+    """Handles deleting a post and its associated comments/reactions."""
     user_id = session.get('user_id')
 
-    # Block access if user is not logged in
     if not user_id:
         flash('You must be logged in to delete a post.', 'danger')
         return redirect(url_for('login'))
 
-    # Find the post in the database
-    post = query_db('SELECT id, user_id FROM posts WHERE id = ?', (post_id,), one=True)
-
-    # Check if the post exists and if the current user is the owner
+    # Fetch post info (including group_id) before deleting
+    post = query_db('SELECT * FROM posts WHERE id = ?', (post_id,), one=True)
     if not post:
         flash('Post not found.', 'danger')
         return redirect(url_for('feed'))
 
+    # Security check: Only author can delete the post
     if post['user_id'] != user_id:
-        # Security check: prevent users from deleting others' posts
         flash('You do not have permission to delete this post.', 'danger')
         return redirect(url_for('feed'))
 
-    # If all checks pass, proceed with deletion
+    group_id = post['group_id']
+
     db = get_db()
-    # To maintain database integrity, delete associated records first
-    db.execute('DELETE FROM comments WHERE post_id = ?', (post_id,))
+    # Delete associated reactions and comments first to keep DB clean
     db.execute('DELETE FROM reactions WHERE post_id = ?', (post_id,))
-    # Finally, delete the post itself
+    db.execute('DELETE FROM comments WHERE post_id = ?', (post_id,))
+    # Delete the post itself
     db.execute('DELETE FROM posts WHERE id = ?', (post_id,))
     db.commit()
 
-    flash('Your post was successfully deleted.', 'success')
-    # Redirect back to the page the user came from, or the feed as a fallback
-    return redirect(request.referrer or url_for('feed'))
+    flash('Post successfully deleted.', 'success')
+
+    # If the post belonged to a group, redirect back to that group's page
+    if group_id:
+        return redirect(url_for('group_detail', group_id=group_id))
+
+    # Otherwise, redirect to the main feed
+    return redirect(url_for('feed'))
 
 @app.route('/u/<username>')
 def user_profile(username):
@@ -1197,10 +1201,53 @@ def user_risk_analysis(user_id):
             password: admin
         Then, navigate to the /admin endpoint. (http://localhost:8080/admin)
     """
-    
-    score = 0
+    user = query_db('SELECT profile, created_at FROM users WHERE id = ?', (user_id,), one=True)
+    if user and user['profile']:
+        _, profile_score = moderate_content(user['profile'])
+    else:
+        profile_score = 0
 
-    return score;
+    if user and user['created_at']:
+            date_str = str(user['created_at'])[:10]
+            date_created = datetime.strptime(date_str, "%Y-%m-%d")
+            account_age = (datetime.today() - date_created).days
+    else:
+        account_age = 0
+
+    posts = query_db('SELECT content FROM posts WHERE user_id = ?', (user_id,))
+    post_scores = []
+    if posts:
+        for post in posts:
+            _, base_score = moderate_content(post['content'])
+            post_scores.append(base_score)
+        average_post_score = sum(post_scores) / len(post_scores)
+    else:
+        average_post_score = 0
+
+    comments = query_db('SELECT content FROM comments WHERE user_id = ?', (user_id,))
+    comment_scores = []
+
+    if comments:
+        for comment in comments:
+            _, base_score = moderate_content(comment['content'])
+            comment_scores.append(base_score)
+        average_comment_score = sum(comment_scores) / len(comment_scores)
+    else:
+        average_comment_score = 0
+
+
+    content_risk_score = (profile_score * 1) + (average_post_score * 3) + (average_comment_score * 1)
+
+    
+    if account_age < 7:
+        user_risk_score = content_risk_score * 1.5
+    elif account_age < 30:
+        user_risk_score = content_risk_score * 1.2
+    else:
+        user_risk_score = content_risk_score
+    
+
+    return min(user_risk_score, 5.0);
 
     
 # Assignment 2.1
@@ -1220,11 +1267,76 @@ def moderate_content(content):
             password: admin
     Then, navigate to the /admin endpoint. (http://localhost:8080/admin)
     """
-
     moderated_content = content
     score = 0
+    content_words = re.findall(r'\b\w+\b', content.lower())
+    content_lower_case = content.lower()
+    url_pattern = r"(?:https?://|www\.)[^\s]+|[a-zA-Z0-9.-]+(?:\.|\[\.\])[a-zA-Z]{2,}[^\s]*"
+    found_urls = re.findall(url_pattern, content, flags=re.IGNORECASE)
+    alpha_chars = [c for c in content if c.isalpha()]
+    for word in content_words: 
+        if word in TIER1_WORDS:
+            return "[content removed due to severe violation]", 5.0
+
+    for phrase in TIER2_PHRASES:
+        if phrase.lower() in content_lower_case:
+            return "[content removed due to spam/scam policy]", 5.0
+
+
+    for word in set(content_words):
+        if word in TIER3_WORDS:
+            pattern = rf"\b{re.escape(word)}\b"
+            replacement = "*" * len(word)
+            score += 2.0
+            moderated_content = re.sub(pattern, replacement, moderated_content, flags=re.IGNORECASE)
+
+    if found_urls:
+        score += len(found_urls) * 2.0
+        moderated_content = re.sub(url_pattern, "[url removed]", moderated_content, flags=re.IGNORECASE)
+
+    if len(alpha_chars) > 15:
+        count_upper = sum(1 for c in alpha_chars if c.isupper())
+        ratio_upper = count_upper / len(alpha_chars)
+
+        if ratio_upper > 0.7:
+            score += 0.5
+
+    if score > 5.0:
+        score = 5.0
     
     return moderated_content, score
+
+#Assignment 2.3: Design claim 20
+@app.route('/api/check-content-warning', methods=['POST'])
+def check_content_warning():
+    """Design Claim 20: Check content before posting and returns warning
+
+    if content breaks platform's rules.
+    """
+    data = request.get_json() or {}
+    content = data.get('content', '')
+
+    if not content or not content.strip():
+        return jsonify({'should_warn': False, 'score': 0.0})
+
+    # use function above
+    _, score = moderate_content(content)
+
+    # if content score is on low (> 1.0) show warning message
+    if score >= 1.0:
+        return jsonify(
+            {
+                'should_warn': True,
+                'score': score,
+                'message': (
+                    'Warning! Your content includes words or urls that'
+                    ' might violate community rules. Are you sure you'
+                    ' want to continue? Harmful content will be modified.'
+                ),
+            }
+        )
+
+    return jsonify({'should_warn': False, 'score': score})
 
 # Coding Assignment #3
 # Assignment 3.1

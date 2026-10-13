@@ -40,17 +40,30 @@
                 </div>
             </div>
 
-            <!-- Group's posts (Visible ONLY to members) -->
+            <!-- Group's posts -->
             <h3>Group's conversations</h3>
             {% if posts %}
                 {% for post in posts %}
                     <div class="card mb-3">
                         <div class="card-body">
-                            <h6 class="card-subtitle mb-2 text-muted">
-                                <a href="{{ url_for('user_profile', username=post.username) }}">@{{ post.username }}</a>
-                                · {{ post.created_at | datetimeformat }}
-                            </h6>
+                            <div class="d-flex justify-content-between align-items-start">
+                                <h6 class="card-subtitle mb-2 text-muted">
+                                    <a href="{{ url_for('user_profile', username=post.username) }}">@{{ post.username }}</a>
+                                    · {{ post.created_at | datetimeformat }}
+                                </h6>
+
+                                <!-- delete button -->
+                                {% if session.get('user_id') == post.user_id %}
+                                    <form action="{{ url_for('delete_post', post_id=post.id) }}" method="POST" onsubmit="return confirm('Are you sure you want to delete this post?');">
+                                        <button type="submit" class="btn btn-danger btn-sm" title="Delete post">
+                                             Delete
+                                        </button>
+                                    </form>
+                                {% endif %}
+                            </div>
+
                             <p class="card-text">{{ post.content }}</p>
+                            
                             <a href="{{ url_for('post_detail', post_id=post.id) }}" class="btn btn-sm btn-outline-dark mt-2">
                                 💬 Comments
                             </a>
