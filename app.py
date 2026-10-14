@@ -1201,19 +1201,21 @@ def user_risk_analysis(user_id):
             password: admin
         Then, navigate to the /admin endpoint. (http://localhost:8080/admin)
     """
+    #getting user profile and the date the profile was created 
     user = query_db('SELECT profile, created_at FROM users WHERE id = ?', (user_id,), one=True)
+    #using moderate_content to determine the profile_score or else set to 0
     if user and user['profile']:
         _, profile_score = moderate_content(user['profile'])
     else:
         profile_score = 0
-
+    #counting the account_age 
     if user and user['created_at']:
             date_str = str(user['created_at'])[:10]
             date_created = datetime.strptime(date_str, "%Y-%m-%d")
             account_age = (datetime.today() - date_created).days
     else:
         account_age = 0
-
+    #retrieving posts and counting post_score
     posts = query_db('SELECT content FROM posts WHERE user_id = ?', (user_id,))
     post_scores = []
     if posts:
@@ -1223,7 +1225,7 @@ def user_risk_analysis(user_id):
         average_post_score = sum(post_scores) / len(post_scores)
     else:
         average_post_score = 0
-
+    #retrieving similarly comments and counting comment_score
     comments = query_db('SELECT content FROM comments WHERE user_id = ?', (user_id,))
     comment_scores = []
 
@@ -1235,10 +1237,10 @@ def user_risk_analysis(user_id):
     else:
         average_comment_score = 0
 
-
+    #risk_score formula from mini social rules 
     content_risk_score = (profile_score * 1) + (average_post_score * 3) + (average_comment_score * 1)
 
-    
+    #basic account_age comparison to count the overall user_risk_score
     if account_age < 7:
         user_risk_score = content_risk_score * 1.5
     elif account_age < 30:
@@ -1246,7 +1248,7 @@ def user_risk_analysis(user_id):
     else:
         user_risk_score = content_risk_score
     
-
+    #risk_score can be max 5 points
     return min(user_risk_score, 5.0);
 
     
@@ -1274,18 +1276,22 @@ def moderate_content(content):
     score = 0
     content_words = re.findall(r'\b\w+\b', content.lower())
     content_lower_case = content.lower()
+    #catching urls with .com, [.] etc.
     url_pattern = r"(?:https?://|www\.)[^\s]+|[a-zA-Z0-9.-]+(?:\.|\[\.\])[a-zA-Z]{2,}[^\s]*"
     found_urls = re.findall(url_pattern, content, flags=re.IGNORECASE)
     alpha_chars = [c for c in content if c.isalpha()]
+
+    #comparing to TIER1 words 
     for word in content_words: 
         if word in TIER1_WORDS:
             return "[content removed due to severe violation]", 5.0
 
+    #then for TIER2 phrases
     for phrase in TIER2_PHRASES:
         if phrase.lower() in content_lower_case:
             return "[content removed due to spam/scam policy]", 5.0
 
-
+    #TIER3 words moderated to stars 
     for word in set(content_words):
         if word in TIER3_WORDS:
             pattern = rf"\b{re.escape(word)}\b"
@@ -1293,10 +1299,12 @@ def moderate_content(content):
             score += 2.0
             moderated_content = re.sub(pattern, replacement, moderated_content, flags=re.IGNORECASE)
 
+    #check for urls
     if found_urls:
         score += len(found_urls) * 2.0
         moderated_content = re.sub(url_pattern, "[url removed]", moderated_content, flags=re.IGNORECASE)
 
+    #over 70% upper chars raises score points by 0.5
     if len(alpha_chars) > 15:
         count_upper = sum(1 for c in alpha_chars if c.isupper())
         ratio_upper = count_upper / len(alpha_chars)
@@ -1319,6 +1327,7 @@ def check_content_warning():
     data = request.get_json() or {}
     content = data.get('content', '')
 
+    #if there is no content, score is 0
     if not content or not content.strip():
         return jsonify({'should_warn': False, 'score': 0.0})
 
