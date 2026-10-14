@@ -1267,6 +1267,9 @@ def moderate_content(content):
             password: admin
     Then, navigate to the /admin endpoint. (http://localhost:8080/admin)
     """
+    if content is None:
+        content = ""
+        
     moderated_content = content
     score = 0
     content_words = re.findall(r'\b\w+\b', content.lower())
