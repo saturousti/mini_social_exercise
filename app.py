@@ -231,29 +231,27 @@ def add_post():
     """Handles creating a new post from the feed."""
     user_id = session.get('user_id')
 
-    # Block access if user is not logged in
     if not user_id:
         flash('You must be logged in to create a post.', 'danger')
         return redirect(url_for('login'))
 
-    # Get content from the submitted form
     content = request.form.get('content')
-
-    # Pass the user's content through the moderation function
     moderated_content = content
 
-    # Basic validation to ensure post is not empty
     if moderated_content and moderated_content.strip():
         db = get_db()
         db.execute('INSERT INTO posts (user_id, content) VALUES (?, ?)',
                    (user_id, moderated_content))
         db.commit()
+
+        # UPDATE ONBOARDING TASK STATUS FOR CREATING A POST
+        update_onboarding_progress(user_id, 'created_post')
+
         flash('Your post was successfully created!', 'success')
+        
     else:
-        # This will catch empty posts or posts that were fully censored
         flash('Post cannot be empty or was fully censored.', 'warning')
 
-    # Redirect back to the main feed to see the new post
     return redirect(url_for('feed'))
     
     
@@ -368,13 +366,13 @@ def user_profile(username):
 @app.route('/profile/edit', methods=['GET', 'POST'])
 def edit_profile():
     """User is able to edit own profile (bio, location, profile photo)."""
-    user_id = session.get('user_id') #check if signed in
+    user_id = session.get('user_id')
     if not user_id:
         flash('You must be logged in to edit your profile.', 'danger')
         return redirect(url_for('login'))
 
     db = get_db()
-    user = query_db('SELECT * FROM users WHERE id = ?', (user_id,), one=True) #getting user from database with user_id key
+    user = query_db('SELECT * FROM users WHERE id = ?', (user_id,), one=True)
 
     if request.method == 'POST':
         profile = request.form.get('profile', '')
@@ -384,7 +382,7 @@ def edit_profile():
         # Save current photo as default photo
         profile_image = user['profile_image'] if 'profile_image' in user.keys() else None
 
-        if remove_image == '1': #actions to remove current photo
+        if remove_image == '1':
             if profile_image:
                 old_file_path = os.path.join(app.config['UPLOAD_FOLDER'], profile_image)
                 if os.path.exists(old_file_path):
@@ -392,11 +390,15 @@ def edit_profile():
             profile_image = None
 
         # Handling new profile picture if given
-        file = request.files.get('profile_image') #requesting picture file
-        if file and file.filename != '' and allowed_file(file.filename): #if accettable file
-            filename = secure_filename(f"user_{session['username']}_{file.filename}") #give new filename
-            file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename)) #uploading file from computer
-            profile_image = filename #profile image is now the given filename 
+        file = request.files.get('profile_image')
+        if file and file.filename != '' and allowed_file(file.filename):
+            filename = secure_filename(f"user_{session['username']}_{file.filename}")
+            file.save(os.path.join(app.config['UPLOAD_FOLDER'], filename))
+            profile_image = filename
+
+        # UPDATE ONBOARDING TASK STATUS FOR ADDING PROFILE PHOTO
+        if profile_image:
+            update_onboarding_progress(user_id, 'added_photo')
 
         # Updating user info (bio/profile, location, profile_image)
         db.execute(
@@ -593,6 +595,8 @@ def add_comment(post_id):
     else:
         flash('Comment cannot be empty.', 'warning')
 
+    update_onboarding_progress(user_id, 'commented_post')
+
     # Redirect back to the page the user came from (likely the post detail page)
     return redirect(request.referrer or url_for('post_detail', post_id=post_id))
 
@@ -733,6 +737,8 @@ def follow_user(user_id):
         flash(f"You are now following {username_to_follow}.", "success")
     except sqlite3.IntegrityError:
         flash("You are already following this user.", "info")
+
+    update_onboarding_progress(follower_id, 'followed_someone')
 
     return redirect(request.referrer or url_for('feed'))
 
@@ -1003,6 +1009,8 @@ def join_group(group_id):
         flash('Joining successful!', 'success')
     except sqlite3.IntegrityError: #already in db
         flash('You are already a member of this group', 'info')
+
+    update_onboarding_progress(user_id, 'joined_group')
 
     return redirect(request.referrer or url_for('group_detail', group_id=group_id))
 
@@ -1360,21 +1368,253 @@ def recommend(user_id, filter_following):
 
     Returns:
         A list of 5 recommended posts, in reverse-chronological order.
-
-    To test whether your recommendation algorithm works, let's pretend we like the DIY topic. Here are some users that often post DIY comment and a few example posts. Make sure your account did not engage with anything else. You should test your algorithm with these and see if your recommendation algorithm picks up on your interest in DIY and starts showing related content.
-    
-    Users: @starboy99, @DancingDolphin, @blogger_bob
-    Posts: 1810, 1875, 1880, 2113
-    
-    Materials: 
-    - https://www.nvidia.com/en-us/glossary/recommendation-system/
-    - http://www.configworks.com/mz/handout_recsys_sac2010.pdf
-    - https://www.researchgate.net/publication/227268858_Recommender_Systems_Handbook
     """
+    # 1. Hae postaukset, joista käyttäjä on pitänyt (lisätty puuttuva sulku kyselyyn)
+    user_liked_posts = query_db(
+        "SELECT post_id FROM reactions WHERE user_id = ? AND reaction_type IN ('like', 'love')", 
+        (user_id,)
+    )
+    liked_post_ids = [r['post_id'] for r in user_liked_posts] if user_liked_posts else []
 
-    recommended_posts = {} 
+    # 2. Hae seuratut käyttäjät
+    followed_users = query_db("SELECT followed_id FROM follows WHERE follower_id = ?", (user_id,))
+    followed_user_ids = [f['followed_id'] for f in followed_users] if followed_users else []
 
-    return recommended_posts;
+    liked_authors = []
+    liked_words = []
+
+    # 3. Rakenna käyttäjän kiinnostusprofiili
+    if liked_post_ids:
+        placeholders = ','.join('?' * len(liked_post_ids))
+        liked_data = query_db(f'''
+            SELECT user_id, content FROM posts WHERE id IN ({placeholders})
+        ''', liked_post_ids)
+    
+        if liked_data:
+            for row in liked_data:
+                liked_authors.append(row['user_id'])
+                # Kerätään sanoja avainsana-analyysiä varten
+                words = re.findall(r'\b\w+\b', row['content'].lower())
+                liked_words.extend(words)
+
+    # 4. Suodatetaan pois ryhmäpostaukset ja käyttäjän jo reagoimat postaukset
+    where_conditions = ["p.group_id IS NULL"]
+    params = []
+
+    if liked_post_ids:
+        placeholders = ','.join('?' * len(liked_post_ids))
+        where_conditions.append(f"p.id NOT IN ({placeholders})")
+        params.extend(liked_post_ids)
+
+    # Jos filter_following = True, haetaan vain seurattujen käyttäjien postaukset
+    if filter_following and followed_user_ids:
+        placeholders = ','.join('?' * len(followed_user_ids))
+        where_conditions.append(f"p.user_id IN ({placeholders})")
+        params.extend(followed_user_ids)
+    elif filter_following and not followed_user_ids:
+        # Jos käyttäjä haluaa nähdä vain seurattujen postauksia, mutta ei seuraa ketään
+        return []
+
+    where_clause = "WHERE " + " AND ".join(where_conditions)
+
+    query = f'''
+        SELECT p.id, p.content, p.created_at, u.username, u.id as user_id
+        FROM posts p
+        JOIN users u ON p.user_id = u.id
+        {where_clause}
+    '''
+    candidate_posts = query_db(query, params)
+    
+    if not candidate_posts:
+        return []
+
+    scored_posts = []
+
+    # 5. Pisteytetään ehdokkaat (Korjattu sisennykset!)
+    for post in candidate_posts:
+        score = 0.0
+        content_lower = post['content'].lower()
+
+        # Sisältöpohjainen pisteytys: täsmäävätkö sanat tykättyjen sanojen kanssa?
+        for word in liked_words:
+            if len(word) > 3 and word in content_lower:
+                score += 1.0
+
+        # Tekijäpohjainen pisteytys: onko sama kirjoittaja?
+        if post['user_id'] in liked_authors:
+            score += 2.0
+
+        scored_posts.append((score, dict(post)))
+
+    # 6. Järjestetään parhaat suositukset (korkeimmat pisteet ensin)
+    scored_posts.sort(key=lambda x: x[0], reverse=True)
+    top_candidates = [item[1] for item in scored_posts[:10]]
+
+    # 7. Järjestetään valitut ehdokkaat käänteiseen aikajärjestykseen (uusin ensin)
+    top_candidates.sort(key=lambda x: str(x['created_at']), reverse=True)
+
+    # Palautetaan 5 uusinta suositusta
+    return top_candidates[:5]
+
+#Assignment 3.2: Design Claim 18 implementation:
+
+def update_onboarding_progress(user_id, task_name):
+    """Updates the onboarding task status for a new user."""
+    valid_tasks = {'added_photo', 'followed_someone', 'commented_post', 'created_post', 'joined_group'}
+    if task_name not in valid_tasks:
+        return
+
+    db = get_db()
+    # Ensure a record exists for the user
+    db.execute('INSERT OR IGNORE INTO user_onboarding (user_id) VALUES (?)', (user_id,))
+    db.execute(f'UPDATE user_onboarding SET {task_name} = 1 WHERE user_id = ?', (user_id,))
+    db.commit()
+
+@app.route('/api/onboarding-status')
+def onboarding_status():
+    """Returns the onboarding task progress for the currently logged-in user."""
+    user_id = session.get('user_id')
+    if not user_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    db = get_db()
+    
+    # Fetch account creation date to check account age
+    user = query_db('SELECT created_at FROM users WHERE id = ?', (user_id,), one=True)
+    
+    if user and user['created_at']:
+        user_created = user['created_at']
+        if isinstance(user_created, str):
+            user_created = datetime.strptime(user_created[:10], '%Y-%m-%d')
+            
+        # Calculate account age in days using datetime.utcnow()
+        account_age_days = (datetime.utcnow() - user_created).days
+
+        # If account is older than 1 day, treat as an old user (bypass onboarding modal)
+        if account_age_days > 1:
+            return jsonify({
+                'added_photo': 1,
+                'followed_someone': 1,
+                'commented_post': 1,
+                'created_post': 1,
+                'joined_group': 1
+            })
+
+    # Fetch onboarding progress for new users (account created within 1 day)
+    status = query_db('SELECT * FROM user_onboarding WHERE user_id = ?', (user_id,), one=True)
+    
+    if not status:
+        # Create default initial record if none exists
+        db.execute('INSERT INTO user_onboarding (user_id) VALUES (?)', (user_id,))
+        db.commit()
+        status = {'added_photo': 0, 'followed_someone': 0, 'commented_post': 0, 'created_post': 0, 'joined_group': 0}
+    else:
+        status = dict(status)
+
+    return jsonify(status)
+
+def update_onboarding_progress(user_id, task_name):
+    """Updates the onboarding task status for a logged-in user."""
+    valid_tasks = {'added_photo', 'followed_someone', 'commented_post', 'created_post', 'joined_group'}
+    if task_name not in valid_tasks or not user_id:
+        return
+
+    db = get_db()
+    # Ensure record exists for user
+    db.execute('INSERT OR IGNORE INTO user_onboarding (user_id) VALUES (?)', (user_id,))
+    db.execute(f'UPDATE user_onboarding SET {task_name} = 1 WHERE user_id = ?', (user_id,))
+    db.commit()
+
+#Assignment 3.3:
+#Design claim 20
+
+@app.route('/api/newcomers/unwelcomed')
+def get_unwelcomed_newcomer():
+    """Returns a recent newcomer who hasn't received friendly interactions yet."""
+    current_user_id = session.get('user_id')
+    if not current_user_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    db = get_db()
+    
+    # Find a newcomer (created in last 7 days, not the current user) 
+    # who hasn't received any comments on their posts yet
+    query = '''
+        SELECT u.id, u.username, u.profile_image, u.created_at
+        FROM users u
+        WHERE u.id != ? 
+          AND u.created_at >= datetime('now', '-7 days')
+          AND NOT EXISTS (
+              SELECT 1 FROM comments c 
+              JOIN posts p ON c.post_id = p.id 
+              WHERE p.user_id = u.id AND c.user_id != u.id
+          )
+        ORDER BY u.created_at DESC
+        LIMIT 1
+    '''
+    newcomer = query_db(query, (current_user_id,), one=True)
+    
+    if newcomer:
+        return jsonify({
+            'has_newcomer': True,
+            'user_id': newcomer['id'],
+            'username': newcomer['username'],
+            'profile_image': newcomer['profile_image']
+        })
+    
+    return jsonify({'has_newcomer': False})
+
+@app.route('/api/newcomers/welcome', methods=['POST'])
+def send_welcome_comment():
+    """Automatically posts a welcome comment to the newcomer's latest personal feed post."""
+    current_user_id = session.get('user_id')
+    if not current_user_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+
+    data = request.get_json() or {}
+    raw_newcomer_id = data.get('newcomer_id')
+
+    if not raw_newcomer_id:
+        return jsonify({'error': 'Missing newcomer_id'}), 400
+
+    try:
+        newcomer_id = int(raw_newcomer_id)
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Invalid newcomer_id'}), 400
+
+    db = get_db()
+    
+    # Fetch newcomer's latest PERSONAL post (excluding group posts where group_id IS NOT NULL)
+    latest_post = query_db(
+        'SELECT id FROM posts WHERE user_id = ? AND (group_id IS NULL OR group_id = 0) ORDER BY created_at DESC LIMIT 1',
+        (newcomer_id,),
+        one=True
+    )
+
+    if latest_post:
+        # Support both dict and tuple formats
+        post_id = latest_post['id'] if isinstance(latest_post, dict) or hasattr(latest_post, 'keys') else latest_post[0]
+
+        welcome_message = "Welcome to the community! 👋🎉"
+        db.execute(
+            'INSERT INTO comments (post_id, user_id, content) VALUES (?, ?, ?)',
+            (post_id, current_user_id, welcome_message)
+        )
+        db.commit()
+        
+        # Update onboarding status for commenter (Design Claim 18)
+        update_onboarding_progress(current_user_id, 'commented_post')
+        
+        return jsonify({'success': True, 'mode': 'commented'})
+    
+    # If the newcomer has no personal feed posts, send response to redirect to profile
+    newcomer_user = query_db('SELECT username FROM users WHERE id = ?', (newcomer_id,), one=True)
+    username = newcomer_user['username'] if newcomer_user else ''
+    return jsonify({
+        'success': True, 
+        'mode': 'redirect', 
+        'username': username
+    })
 
 if __name__ == '__main__':
     with app.app_context():

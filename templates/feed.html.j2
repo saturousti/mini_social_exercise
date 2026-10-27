@@ -22,6 +22,55 @@
 </div>
 {% endif %}
 
+<!-- Design Claim 20: Newcomer Welcome Banner for Existing Members -->
+{% if session.get('user_id') %}
+<div id="welcome-newcomer-card" class="col-md-8 mx-auto mb-4" style="display: none;">
+  <div style="background: #f0f7ff; border: 1px solid #cce5ff; padding: 15px 20px; border-radius: 10px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 4px rgba(0,0,0,0.05);">
+    <div class="d-flex align-items-center">
+      <span style="font-size: 1.8em; margin-right: 15px;">🌟</span>
+      <div>
+        <strong style="color: #004085;">Make a newcomer feel welcome!</strong>
+        <p style="margin: 0; font-size: 0.9em; color: #004085;" id="newcomer-welcome-text">
+          A new member just joined. Say hi to start their journey!
+        </p>
+      </div>
+    </div>
+    <a id="newcomer-profile-link" href="#" class="btn btn-sm btn-primary" style="white-space: nowrap; margin-left: 15px;">
+      Say Hi 👋
+    </a>
+  </div>
+</div>
+{% endif %}
+
+<!-- Onboarding Pop-up Modal (Design Claim 18) -->
+<div id="onboarding-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); z-index: 9999;">
+  <div style="background: white; padding: 25px; border-radius: 12px; width: 90%; max-width: 420px; margin: 100px auto; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.3);">
+    
+    <!-- Onboarding Task List View -->
+    <div id="onboarding-tasks-view">
+      <h3 style="margin-top: 0;">Time to make some friends! 👋</h3>
+      <p>Complete these 5 quick tasks to get started in the community:</p>
+      
+      <ul id="onboarding-task-list" style="list-style: none; padding: 0; text-align: left; line-height: 2;">
+        <li id="task-photo">❌ <strong>Add a profile picture</strong></li>
+        <li id="task-follow">❌ <strong>Follow someone</strong></li>
+        <li id="task-comment">❌ <strong>Comment on a post</strong></li>
+        <li id="task-post">❌ <strong>Make a post</strong></li>
+        <li id="task-group">❌ <strong>Join a group and start a conversation!</strong></li>
+      </ul>
+    </div>
+
+    <!-- Success Message View -->
+    <div id="onboarding-success-view" style="display: none;">
+      <h3 style="margin-top: 0; color: #28a745;">Great job! 🎉</h3>
+      <p style="font-size: 1.1em; margin-top: 15px;">All onboarding tasks have been completed!</p>
+      <p class="text-muted">You are all set to enjoy the community.</p>
+    </div>
+
+    <button onclick="closeOnboardingModal()" class="btn btn-primary mt-3" style="padding: 8px 24px;">Got it!</button>
+  </div>
+</div>
+
 <!-- Horoscope in front page -->
 {% if session.get('username') %}
 <div class="col-md-8 mx-auto mb-4">
@@ -216,4 +265,131 @@
       Next &raquo;
     </a>
   </div>
+
+<script>
+function checkOnboardingStatus() {
+    // Fetch onboarding status from backend API for logged-in user (Design Claim 18)
+    fetch('/api/onboarding-status')
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('User not logged in or status unavailable');
+            }
+            return response.json();
+        })
+        .then(data => {
+            const tasks = {
+                added_photo: data.added_photo,
+                followed_someone: data.followed_someone,
+                commented_post: data.commented_post,
+                created_post: data.created_post,
+                joined_group: data.joined_group
+            };
+
+            const allCompleted = Object.values(tasks).every(status => status === 1 || status === true);
+
+            const modal = document.getElementById('onboarding-modal');
+            const tasksView = document.getElementById('onboarding-tasks-view');
+            const successView = document.getElementById('onboarding-success-view');
+
+            if (allCompleted) {
+                // Do not display modal if all onboarding tasks are completed or user is old
+                modal.style.display = 'none';
+            } else {
+                // Display pending onboarding task list UI
+                tasksView.style.display = 'block';
+                successView.style.display = 'none';
+                modal.style.display = 'block';
+
+                updateTaskUI('task-photo', data.added_photo, 'Add a profile picture');
+                updateTaskUI('task-follow', data.followed_someone, 'Follow someone');
+                updateTaskUI('task-comment', data.commented_post, 'Comment on a post');
+                updateTaskUI('task-post', data.created_post, 'Make a post');
+                updateTaskUI('task-group', data.joined_group, 'Join a group and start a conversation!');
+            }
+        })
+        .catch(error => {
+            console.log('Onboarding status check skipped:', error.message);
+        });
+}
+
+function checkNewcomerBanner() {
+    // Fetch unwelcomed newcomer for existing members (Design Claim 20)
+    fetch('/api/newcomers/unwelcomed')
+        .then(response => {
+            if (!response.ok) throw new Error('Not available');
+            return response.json();
+        })
+        .then(data => {
+            if (data.has_newcomer) {
+                const card = document.getElementById('welcome-newcomer-card');
+                const textEl = document.getElementById('newcomer-welcome-text');
+                const linkEl = document.getElementById('newcomer-profile-link');
+
+                if (card && textEl && linkEl) {
+                    textEl.innerHTML = `<strong>@${data.username}</strong> just joined the community! Be the first to welcome them.`;
+                    
+                    // Attach click handler to automatically post a welcome comment
+                    linkEl.onclick = function(e) {
+                        e.preventDefault();
+                        sendQuickWelcome(data.user_id, data.username);
+                    };
+                    card.style.display = 'block';
+                }
+            }
+        })
+        .catch(err => console.log('Newcomer banner skipped:', err.message));
+}
+
+// Function to send automatic welcome comment to newcomer's latest post
+function sendQuickWelcome(newcomerId, username) {
+    fetch('/api/newcomers/welcome', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newcomer_id: newcomerId })
+    })
+    .then(r => r.json())
+    .then(res => {
+        if (res.success) {
+            if (res.mode === 'commented') {
+                alert(`You welcomed @${username} with a comment! 🎉`);
+                location.reload(); // Reload feed to show the newly added comment
+            } else {
+                // Redirect to profile if the newcomer hasn't posted anything yet
+                window.location.href = `/u/${username}`;
+            }
+        }
+    })
+    .catch(err => console.error('Error sending welcome:', err));
+}
+
+// Helper function to update task UI state
+function updateTaskUI(elementId, isCompleted, labelText) {
+    const el = document.getElementById(elementId);
+    if (el) {
+        if (isCompleted === 1 || isCompleted === true) {
+            el.innerHTML = `✅ <del>${labelText}</del>`;
+            el.style.color = 'gray';
+        } else {
+            el.innerHTML = `❌ <strong>${labelText}</strong>`;
+            el.style.color = 'black';
+        }
+    }
+}
+
+// Function to close onboarding modal
+function closeOnboardingModal() {
+    document.getElementById('onboarding-modal').style.display = 'none';
+}
+
+// Execute checks on page load
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() {
+        checkOnboardingStatus();
+        checkNewcomerBanner();
+    });
+} else {
+    checkOnboardingStatus();
+    checkNewcomerBanner();
+}
+</script>
 {% endblock %}
