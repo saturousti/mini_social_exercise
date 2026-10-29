@@ -1367,23 +1367,23 @@ def recommend(user_id, filter_following):
         filter_following: Boolean, True if we only want to see recommendations from followed users.
 
     Returns:
-        A list of 5 recommended posts, in reverse-chronological order.
+        A list of 5 recommended posts. 
     """
-    # 1. Hae postaukset, joista käyttäjä on pitänyt (lisätty puuttuva sulku kyselyyn)
+    #Retrieve all posts that user has added a positive reaction to
     user_liked_posts = query_db(
         "SELECT post_id FROM reactions WHERE user_id = ? AND reaction_type IN ('like', 'love')", 
         (user_id,)
     )
     liked_post_ids = [r['post_id'] for r in user_liked_posts] if user_liked_posts else []
 
-    # 2. Hae seuratut käyttäjät
+    #retrieve followed users
     followed_users = query_db("SELECT followed_id FROM follows WHERE follower_id = ?", (user_id,))
     followed_user_ids = [f['followed_id'] for f in followed_users] if followed_users else []
 
     liked_authors = []
     liked_words = []
 
-    # 3. Rakenna käyttäjän kiinnostusprofiili
+    #build an interest profile
     if liked_post_ids:
         placeholders = ','.join('?' * len(liked_post_ids))
         liked_data = query_db(f'''
@@ -1397,7 +1397,7 @@ def recommend(user_id, filter_following):
                 words = re.findall(r'\b\w+\b', row['content'].lower())
                 liked_words.extend(words)
 
-    # 4. Suodatetaan pois ryhmäpostaukset ja käyttäjän jo reagoimat postaukset
+    # lets not use group posts or old reactions
     where_conditions = ["p.group_id IS NULL"]
     params = []
 
@@ -1406,13 +1406,13 @@ def recommend(user_id, filter_following):
         where_conditions.append(f"p.id NOT IN ({placeholders})")
         params.extend(liked_post_ids)
 
-    # Jos filter_following = True, haetaan vain seurattujen käyttäjien postaukset
+    #if filter_following = True, retrieve followe users' posts
     if filter_following and followed_user_ids:
         placeholders = ','.join('?' * len(followed_user_ids))
         where_conditions.append(f"p.user_id IN ({placeholders})")
         params.extend(followed_user_ids)
     elif filter_following and not followed_user_ids:
-        # Jos käyttäjä haluaa nähdä vain seurattujen postauksia, mutta ei seuraa ketään
+        # if user is willing to see only followed users' posts but is not following anyone
         return []
 
     where_clause = "WHERE " + " AND ".join(where_conditions)
@@ -1430,30 +1430,30 @@ def recommend(user_id, filter_following):
 
     scored_posts = []
 
-    # 5. Pisteytetään ehdokkaat (Korjattu sisennykset!)
+    #give points to possible candidates
     for post in candidate_posts:
         score = 0.0
         content_lower = post['content'].lower()
 
-        # Sisältöpohjainen pisteytys: täsmäävätkö sanat tykättyjen sanojen kanssa?
+        #is there same words used compared to liked content?
         for word in liked_words:
             if len(word) > 3 and word in content_lower:
                 score += 1.0
 
-        # Tekijäpohjainen pisteytys: onko sama kirjoittaja?
+        # is it a same writer?
         if post['user_id'] in liked_authors:
             score += 2.0
 
         scored_posts.append((score, dict(post)))
 
-    # 6. Järjestetään parhaat suositukset (korkeimmat pisteet ensin)
+    #higher points first
     scored_posts.sort(key=lambda x: x[0], reverse=True)
     top_candidates = [item[1] for item in scored_posts[:10]]
 
     # 7. Järjestetään valitut ehdokkaat käänteiseen aikajärjestykseen (uusin ensin)
     top_candidates.sort(key=lambda x: str(x['created_at']), reverse=True)
 
-    # Palautetaan 5 uusinta suositusta
+    #return 5 candicates
     return top_candidates[:5]
 
 #Assignment 3.2: Design Claim 18 implementation:
